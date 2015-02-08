@@ -1,24 +1,28 @@
-var esprima = require('esprima'),
-	Node = require('./cfg').Node,
-	fs = require('fs'),
-	filename, content, options, syntax, entry;
+try{
+	var esprima = require('esprima'),
+		Node = require('./cfg').Node,
+		compare = require('./compare').compare,
+		fs = require('fs'),
+		program1, program2;
 
-//console.log(JSON.stringify(esprima.parse('var a = 42'), null, 4));
-process.argv.forEach(function(value) {
-	//console.log(value);
-});
+	program1 = parse(process.argv[2]);
+	program2 = parse(process.argv[3]);
+	compare(program1, program2);
+} catch (e) {
+	//console.log(e.message);
+	console.log(e.stack);
+	process.exit(1);
+}
 
-try {
-	filename = process.argv[2];
+function parse(filename) {
+	var content, options, syntax, program;
 	content = fs.readFileSync(filename);
-	options = {loc: true};
+	//options = {loc: true};
 	syntax = esprima.parse(content);
 	console.log(JSON.stringify(syntax, null, 4));
-	entry = new Node({type: 'Entry'});
-	buildCFG(syntax, entry);
-} catch (e) {
-	console.log(e.message);
-	process.exit(1);
+	program = new Node({type: 'Program'});
+	buildCFG(syntax, program);
+	return program;
 }
 
 // syntax: syntax tree
@@ -38,8 +42,10 @@ function buildCFG(syntax, prevNode) {
 		syntax.body.forEach(function(value) {
 			node = buildCFG(value, node);
 		});
-		break;	
+		break;
+	case 'VariableDeclaration':
 	case 'ExpressionStatement':
+	case 'EmptyStatement':
 		node = new Node(syntax);
 		prevNode.addNext(node);
 		break;
