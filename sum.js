@@ -8,3 +8,18 @@ for (i in a) {
 		s += a[i];
 }
 console.log(s);
+hello();
+
+function hello() {
+	return;
+	console.log('hello');
+}
+
+foo = function(){}
+console.log(hello);
+console.log(foo);
+
+s = 'asdf';
+b = {};
+b[s] = 1;
+console.log(b);
