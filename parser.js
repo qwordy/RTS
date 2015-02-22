@@ -27,6 +27,7 @@ function parse(filename) {
 	stack.push({type: 'Program', entry: program, exit: programExit});
 	parseFunction(syntax, program).addNext(programExit);
 	console.log(stack);
+	stack.pop();
 	return program;
 }
 
@@ -41,7 +42,8 @@ function parseFunction(syntax, prevNode) {
 			entryNode = new Node(cloneObject(value));	// function head
 			exitNode = new Node({type: 'FunctionExit'});
 			stack.push({type: 'Function', entry: entryNode, exit: exitNode});
-			parseFunction(value.body, entryNode);
+			parseFunction(value.body, entryNode).addNext(exitNode);
+			stack.pop();
 			prevNode.functions[value.id.name] = entryNode;
 		}
 	});
@@ -52,75 +54,104 @@ function parseFunction(syntax, prevNode) {
 // prevNode: previous node in CFG
 // Return the last node
 function buildCFG(syntax, prevNode) {
-	var node, endNode, ifNode, endIfNode, ifSyntax,
-		forNode, endForNode;
+	var node;	// the last node
+
 	console.log(JSON.stringify(syntax));
 	switch (syntax.type) {
 	case 'Program':
-		node = prevNode;
-		syntax.body.forEach(function(value) {
-			node = buildCFG(value, node);
-		});
-		break;
-
 	case 'BlockStatement':
 		node = prevNode;
 		syntax.body.forEach(function(value) {
 			node = buildCFG(value, node);
 		});
-		break;
+		return node;
 
 	case 'ReturnStatement':
+		node = new Node(syntax);
+		if (prevNode) prevNode.addNext(node);
 		for (var i = stack.length - 1; i--; i >= 0) {
-			if (stack[i].type == 'Function' || stack[i].type == 'Program')
-				
-		break;
+			if (stack[i].type == 'Function' || stack[i].type == 'Program') {
+				node.addNext(stack[i].exit);
+				break;
+			}
+		}
+		return null
 
 	case 'VariableDeclaration':
 	case 'ExpressionStatement':
 	case 'EmptyStatement':
 		node = new Node(syntax);
-		prevNode.addNext(node);
-		break;
+		if (prevNode) prevNode.addNext(node);
+		return node;
 
+	// for -> endFor, bodyEnd -> for
+	case 'ForStatement':
 	case 'ForInStatement':
+		var forNode, endForNode, bodyEndNode;
+
 		forNode = new Node(cloneObject(syntax));	// for head node
-		prevNode.addNext(forNode);
+		if (prevNode) prevNode.addNext(forNode);
 
 		endForNode = new Node({type: 'EndFor'});
 		forNode.addNext(endForNode);
 
 		stack.push({type: 'For', entry: forNode, exit: endForNode});
 
-		endNode = buildCFG(syntax.body, node);	// body end node
-		endNode.addNext(node);
+		bodyEndNode = buildCFG(syntax.body, forNode);	// body end node
+		if (bodyEndNode) bodyEndNode.addNext(forNode);
 
-		node = endNode;
+		stack.pop();
+		return endForNode;
+	
+	case 'BreakStatement':
+		node = new Node(syntax);
+		if (prevNode) prevNode.addNext(node);
+		for (var i = stack.length - 1; i--; i >= 0) {
+			if (stack[i].type == 'For') {
+				node.addNext(stack[i].exit);
+				break;
+			}
+		}
+		return null;
 
-		break;
+	case 'ContinueStatement':
+		node = new Node(syntax);
+		if (prevNode) prevNode.addNext(node);
+		for (var i = stack.length - 1; i--; i >= 0) {
+			if (stack[i].type == 'For') {
+				node.addNext(stack[i].entry);
+				break;
+			}
+		}
+		return null;
 
 	case 'IfStatement':
+		var ifSyntax, ifNode, endIfNode, endBodyNode;
+
 		ifSyntax = {};	// if syntax head
 		ifSyntax.type = syntax.type;
 		ifSyntax.test = syntax.test;
-		ifNode = new Node(ifSyntax);	// cfg if head node
-		prevNode.addNext(ifNode);
-		endIfNode = new Node({type: 'EndIf'});	// cfg endif node
+
+		ifNode = new Node(ifSyntax);	// if head node
+		if (prevNode) prevNode.addNext(ifNode);
+
+		endIfNode = new Node({type: 'EndIf'});	// endif node
+
 		if (syntax.consequent != null) {
-			endNode = buildCFG(syntax.consequent, ifNode);
-			endNode.addNext(endIfNode);
+			endBodyNode = buildCFG(syntax.consequent, ifNode);
+			endBodyNode.addNext(endIfNode);
 		}
+
 		if (syntax.alternate != null) {
-			endNode = buildCFG(syntax.alternate, ifNode);
-			endNode.addNext(endIfNode);
+			endBodyNode = buildCFG(syntax.alternate, ifNode);
+			endBodyNode.addNext(endIfNode);
 		}
-		node = endIfNode;
-		break;
+		
+		return endIfNode;
 
 	case 'FunctionDeclaration':
-		node = prevNode;
-		console.log(node);
-		break;
+		//console.log(node);
+		return prevNode;
 	}
 
 	return node;	// the last node
