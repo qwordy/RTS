@@ -103,6 +103,41 @@ function buildCFG(syntax, prevNode) {
 		stack.pop();
 		return endForNode;
 	
+	case 'WhileStatement':
+		var whileNode, endWhileNode, bodyEndNode;
+
+		whileNode = new Node(cloneObject(syntax));
+		if (prevNode) prevNode.addNext(whileNode);
+
+		endWhileNode = new Node({type: 'EndWhile'});
+		whileNode.addNext(endWhileNode);
+
+		stack.push({type: 'While', entry: whileNode, exit: endWhileNode});
+
+		bodyEndNode = buildCFG(syntax.body, whileNode);
+		if (bodyEndNode) bodyEndNode.addNext(whileNode);
+
+		stack.pop();
+		return endWhileNode;
+	
+	// bodyEnd -> while, while -> do
+	case 'DoWhileStatement':
+		var doNode, whileNode, bodyEndNode;
+
+		doNode = new Node({type: 'Do'});
+		if (prevNode) prevNode.addNext(doNode);
+
+		whileNode = new Node(cloneObject(syntax));
+		whileNode.addNext(doNode);
+
+		stack.push({type: 'DoWhile', entry: doNode, exit: whileNode});
+
+		bodyEndNode = buildCFG(syntax.body, doNode);
+		if (bodyEndNode) bodyEndNode.addNext(whileNode);
+
+		stack.pop();
+		return whileNode;
+
 	case 'BreakStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
