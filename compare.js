@@ -36,6 +36,21 @@ function nodesEqual(node1, node2) {
 				return false;
 		}
 	}
+
+	// CallExpression
+	if (node1.type == 'ExpressionStatement') {
+		if (node1.expression.type == 'CallExpression') {
+			var callee1 = node1.expression.callee;
+			if (callee1.type == 'Identifier') {
+				console.log(callee1);
+				if (callee1.name in program1.functions) {
+					var name2 = node2.expression.callee.name;
+					console.log(callee1.name, name2);
+				}
+			}
+		}
+	}
+	
 	return true;
 }
 

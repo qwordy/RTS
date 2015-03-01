@@ -10,3 +10,9 @@ for (i in a) {
 		//s += a[i];
 }
 console.log(s);
+
+function hello() {
+	console.log('hello');
+}
+
+hello();
