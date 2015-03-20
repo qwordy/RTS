@@ -139,6 +139,7 @@ function buildCFG(syntax, prevNode) {
 		stack.pop();
 		return whileNode;
 
+	// Find the nearest iteration in stack
 	case 'BreakStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
