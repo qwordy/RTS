@@ -1,6 +1,7 @@
 function Node(syntax) {
 	this.id = Node.id++;
 	console.log('node' + this.id);
+	console.log(syntax);
 	this.children = new Array();	// successor
 	this.edges = new Array();	// edge number
 	this.functions = {};	// store function pointers in entry node

@@ -57,7 +57,7 @@ function parseFunction(syntax, prevNode) {
 function buildCFG(syntax, prevNode) {
 	var node;	// the last node
 
-	console.log(JSON.stringify(syntax));
+	//console.log(JSON.stringify(syntax));
 	switch (syntax.type) {
 	case 'Program':
 	case 'BlockStatement':
@@ -185,6 +185,22 @@ function buildCFG(syntax, prevNode) {
 		}
 		
 		return endIfNode;
+	
+	case 'SwitchStatement':
+		var switchSyntax, switchNode, endSwitchNode;
+
+		switchSyntax = {};
+		switchSyntax.type = syntax.type;
+		switchSyntax.discriminant = syntax.discriminant;
+
+		switchNode = new Node(switchSyntax);
+		if (prevNode) prevNode.addNext(switchNode);
+
+		endSwitchNode = new Node({type: 'EndSwitch'});
+
+		
+
+		return endSwitchNode;
 
 	case 'FunctionDeclaration':
 		//console.log(node);
