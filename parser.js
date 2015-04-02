@@ -4,8 +4,10 @@ try{
 		//compare = require('./compare').compare,
 		fs = require('fs'),
 		program1, program2, stack;
+		// stack item: {type, entry, exit}
 	
 	program1 = parse(process.argv[2]);
+	Node.id = Node.edgeId = 0;
 	program2 = parse(process.argv[3]);
 	compare(program1, program2);
 } catch (e) {
@@ -27,7 +29,7 @@ function parse(filename) {
 	stack.push({type: 'Program', entry: program, exit: programExit});
 	parseFunction(syntax, program).addNext(programExit);
 	console.log(stack);
-	console.log(program.functions['hello']);
+	//console.log(program.functions['hello']);
 	stack.pop();
 	return program;
 }
@@ -37,13 +39,14 @@ function parse(filename) {
 // Return the last node in CFG
 // No nested functions
 function parseFunction(syntax, prevNode) {
-	var entryNode, exitNode;
+	var entryNode, exitNode, node;
 	syntax.body.forEach(function(value) {
 		if (value.type == 'FunctionDeclaration') {
 			entryNode = new Node(cloneObject(value));	// function head
 			exitNode = new Node({type: 'FunctionExit'});
 			stack.push({type: 'Function', entry: entryNode, exit: exitNode});
-			parseFunction(value.body, entryNode).addNext(exitNode);
+			node = parseFunction(value.body, entryNode);
+			if (node) node.addNext(exitNode);
 			stack.pop();
 			prevNode.functions[value.id.name] = entryNode;
 		}
@@ -62,9 +65,10 @@ function buildCFG(syntax, prevNode) {
 	case 'Program':
 	case 'BlockStatement':
 		node = prevNode;
-		syntax.body.forEach(function(value) {
-			node = buildCFG(value, node);
-		});
+		for (var i in syntax.body) {
+			node = buildCFG(syntax.body[i], node);
+			if (node == null) break;
+		}
 		return node;
 
 	case 'ReturnStatement':
@@ -143,8 +147,8 @@ function buildCFG(syntax, prevNode) {
 	case 'BreakStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		for (var i = stack.length - 1; i--; i >= 0) {
-			if (stack[i].type == 'For') {
+		for (var i = stack.length - 1; i >= 0; i--) {
+			if (['For', 'While', 'Do', 'Switch'].indexOf(stack[i].type) != -1) {
 				node.addNext(stack[i].exit);
 				break;
 			}
@@ -154,9 +158,12 @@ function buildCFG(syntax, prevNode) {
 	case 'ContinueStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		for (var i = stack.length - 1; i--; i >= 0) {
-			if (stack[i].type == 'For') {
+		for (var i = stack.length - 1; i >= 0; i--) {
+			if (stack[i].type == 'For' || stack[i].type == 'While') {
 				node.addNext(stack[i].entry);
+				break;
+			} else if (stack[i].type == 'Do') {
+				node.addNext(stack[i].exit);
 				break;
 			}
 		}
@@ -187,7 +194,7 @@ function buildCFG(syntax, prevNode) {
 		return endIfNode;
 	
 	case 'SwitchStatement':
-		var switchSyntax, switchNode, endSwitchNode;
+		var switchSyntax, switchNode, endSwitchNode, caseSyntax, caseNode;
 
 		switchSyntax = {};
 		switchSyntax.type = syntax.type;
@@ -198,8 +205,28 @@ function buildCFG(syntax, prevNode) {
 
 		endSwitchNode = new Node({type: 'EndSwitch'});
 
-		
+		stack.push({type: 'Switch', entry: switchNode, exit: endSwitchNode});
 
+		node = null;
+		syntax.cases.forEach(function(value) {
+			caseSyntax = {};
+			caseSyntax.type = value.type;
+			caseSyntax.test = value.test;
+
+			caseNode = new Node(caseSyntax);
+			switchNode.addNext(caseNode);
+			if (node) node.addNext(caseNode);
+
+			node = caseNode;
+			for (var i in value.consequent) {
+				node = buildCFG(value.consequent[i], node);
+				if (node == null) break;
+			}
+		});
+
+		if (node) node.addNext(endSwitchNode);
+
+		stack.pop();
 		return endSwitchNode;
 
 	case 'FunctionDeclaration':
@@ -229,30 +256,43 @@ function cloneObject(obj) {
 
 // Compare two CFGs
 function compare(node1, node2) {
-	var i, j, child1, child2, findEqual;
+	console.log(node1.id + ' ' + node2.id);
+	debugger;
+	var i, j, child1, child2, findEqual, same;
+
+	same = true;
 	node1.visited = true;
 	for (i in node1.children) {
 		child1 = node1.children[i];
 		findEqual = false;	// if child1 == child2
 		for (j in node2.children) {
 			child2 = node2.children[j];
+			console.log(node1.id + ' ' + node2.id + ' ' + child1.id + ' ' + child2.id);
 			if (nodesEqual(child1.syntax, child2.syntax)) {
 				findEqual = true;
 				break;
 			}
 		}
 		if (findEqual) {
-			if (!child1.visited) compare(child1, child2);
+			if (!child1.visited)
+				if (!compare(child1, child2))
+					same = false;
 		} else {
-			console.log(node1.edges[i]);
+			console.log('danger ' + node1.edges[i]);
+			same = false;
 		}
 	}
+
+	return same;
 }
 
 // True if two nodes are the same. Node is syntax
 function nodesEqual(node1, node2) {
 	if (node1 == node2)	return true;
-	for (var i in node1) {
+	if (JSON.stringify(node1) != JSON.stringify(node2))
+		return false;
+
+	/*for (var i in node1) {
 		if (!node2.hasOwnProperty(i))
 			return false;
 		if (typeof(node1[i]) != typeof(node2[i]))
@@ -265,6 +305,20 @@ function nodesEqual(node1, node2) {
 				return false;
 		}
 	}
+
+	for (var i in node2) {
+		if (!node1.hasOwnProperty(i))
+			return false;
+		if (typeof(node1[i]) != typeof(node2[i]))
+			return false;
+		if (typeof(node1[i]) == 'object') {
+			if (!nodesEqual(node1[i], node2[i]))
+				return false;
+		} else {
+			if (node1[i] != node2[i])
+				return false;
+		}
+	}*/
 
 	// CallExpression
 	if (node1.type == 'ExpressionStatement') {

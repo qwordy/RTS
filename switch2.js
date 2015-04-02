@@ -4,7 +4,9 @@ case 0:
 case 1:
 	console.log(1);
 	break;
-	a = 2;
+case 2:
+	a = 3;
 default:
 	console.log(0);
 }
+

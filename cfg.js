@@ -12,19 +12,15 @@ function Node(syntax) {
 Node.prototype = {
 	addNext: function(node) {
 		this.children.push(node);
-		this.edges.push(getNum());
+		this.edges.push(Node.edgeId);
+		console.log('edge' + Node.edgeId);
+		console.log('node' + this.id + ' -> node' + node.id);
+		Node.edgeId++;
 	}
 };
 
 Node.id = 0;
-
-// Return a integer. +1 each time
-function getNum() {
-	console.log('edge' + getNum.num);
-	return getNum.num++;
-}
-
-getNum.num = 0;
+Node.edgeId = 0;
 
 function Stack() {
 	this.stack = new Array();
