@@ -69,6 +69,8 @@ function parseFunction(syntax, prevNode) {
 	syntax.body.forEach(function(value) {
 		if (value.type == 'FunctionDeclaration') {
 			entryNode = new Node(cloneObject(value));	// function head
+			// {'notVisited', 'visited', 'selectAll'}
+			entryNode.status = 'notVisited';
 			exitNode = new Node({type: 'FunctionExit'});
 			stack.push({type: 'Function', entry: entryNode, exit: exitNode});
 			node = parseFunction(value.body, entryNode);
@@ -283,45 +285,64 @@ function cloneObject(obj) {
 // Compare two CFGs
 // The two nodes are identical already
 // Compare their children
+// Return 'visited' of 'selectAll'
 function compare(node1, node2) {
-	console.log(node1.id + ' ' + node2.id + ' ' + node1.syntax.type);
-	debugger;
-	var i, j, child1, child2, findEqual, same;
+	var i, j, child1, child2, findEqual, result;
 
-	same = true;
+	console.log(node1.id + ' ' + node2.id + ' ' + node1.syntax.type);
+
+	if (node1.syntax.type == 'FunctionExit')
+		return 'visited';
+
+	result = 'selectAll';
 	node1.visited = node2.visited = node2.id;
+
 	for (i in node1.children) {
 		child1 = node1.children[i];
 		findEqual = false;	// if child1 == child2
-		for (j in node2.children) {
-			child2 = node2.children[j];
-			console.log(node1.id + ' ' + node2.id + ' ' + child1.id + ' ' + child2.id);
-			if (nodesEqual(child1.syntax, child2.syntax)) {
-				findEqual = true;
-				break;
+
+		if (node1.syntax.type == 'SwitchStatement') {
+			for (j in node2.children) {
+				child2 = node2.children[j];
+				console.log(node1.id + ' ' + node2.id + ' ' + 
+					child1.id + ' ' + child2.id);
+				if (nodesEqual(child1.syntax, child2.syntax)) {
+					findEqual = true;
+					break;
+				}
 			}
+		} else {
+			child2 = node2.children[i];
+			console.log(node1.id + ' ' + node2.id + ' ' + 
+				child1.id + ' ' + child2.id);
+			findEqual = nodesEqual(child1.syntax, child2.syntax);
 		}
+
 		if (findEqual) {
+			// Switch default case
 			if (node1.syntax.type == 'SwitchCase' && 
 				node1.syntax.test == null) {
 				var cases = node2.father.children;
 				for (var i in cases) {
+					// New case is added in P'
+					// Mark the edge to default case in P sensitive
 					if (cases[i].visited == null) {
 						console.log('danger ' + node1.father.edges[i]);
-						same = false;
+						break;
 					}
 				}
 			}
-			if (child1.visited != child2.id)
-				if (!compare(child1, child2))
-					same = false;
+
+			if (child1.visited != child2.id) {
+				if (compare(child1, child2) == 'visited')
+					result = 'visited';
+			}
 		} else {
 			console.log('danger ' + node1.edges[i]);
-			same = false;
 		}
 	}
 
-	return same;
+	return result;
 }
 
 // True if two nodes are the same. Node is syntax
@@ -359,16 +380,30 @@ function nodesEqual(node1, node2) {
 	}*/
 
 	// CallExpression
-	if (node1.type == 'ExpressionStatement') {
-		if (node1.expression.type == 'CallExpression') {
-			var callee1 = node1.expression.callee;
-			if (callee1.type == 'Identifier') {
-				console.log(callee1);
-				if (callee1.name in program1.functions) {
-					var name2 = node2.expression.callee.name;
-					return compare(program1.functions[callee1.name], program2.functions[name2]);
-				}
-			}
+	var callee1, name2, status, result;
+
+	if (node1.type != 'ExpressionStatement')
+		return true;
+
+	if (node1.expression.type != 'CallExpression')
+		return true;
+
+	callee1 = node1.expression.callee;
+	if (callee1.type != 'Identifier')
+		return true;
+
+	console.log(callee1);
+	if (callee1.name in program1.functions) {
+		name2 = node2.expression.callee.name;
+		status = program1.functions[callee1.name].status;
+		if (status == 'notVisited') {
+			result = compare(program1.functions[callee1.name], 
+				program2.functions[name2]);
+			program1.functions[callee1.name].status = result;
+			// 'visited' or 'selectAll'
+			return result == 'visited';
+		} else {
+			return status == 'visited';
 		}
 	}
 	
