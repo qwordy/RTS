@@ -1,6 +1,32 @@
+function Node(syntax) {
+	this.id = Node.id++;
+	console.log('node' + this.id);
+	console.log(syntax);
+	this.children = new Array();	// successor
+	if (stack.length > 0)
+		this.father = stack[stack.length - 1].entry;
+	this.edges = new Array();	// edge number
+	this.functions = {};	// store function pointers in entry node
+	this.syntax = syntax;	// syntax tree
+	this.visited = null;	// node2.id
+}
+
+Node.prototype = {
+	addNext: function(node) {
+		this.children.push(node);
+		this.edges.push(Node.edgeId);
+		console.log('edge' + Node.edgeId);
+		console.log('node' + this.id + ' -> node' + node.id);
+		Node.edgeId++;
+	}
+};
+
+Node.id = 0;
+Node.edgeId = 0;
+
 try{
 	var esprima = require('esprima'),
-		Node = require('./cfg').Node,
+		//Node = require('./cfg').Node,
 		//compare = require('./compare').compare,
 		fs = require('fs'),
 		program1, program2, stack;
@@ -20,12 +46,12 @@ try{
 function parse(filename) {
 	var content, options, syntax, program, programExit;
 	content = fs.readFileSync(filename);
-	//options = {loc: true};
+	options = {loc: true};
 	syntax = esprima.parse(content);
 	console.log(JSON.stringify(syntax, null, 4));
+	stack = new Array();	// {type, entry, exit}
 	program = new Node({type: 'ProgramEntry'});
 	programExit = new Node({type: 'ProgramExit'});
-	stack = new Array();	// {type, entry, exit}
 	stack.push({type: 'Program', entry: program, exit: programExit});
 	parseFunction(syntax, program).addNext(programExit);
 	console.log(stack);
@@ -255,13 +281,15 @@ function cloneObject(obj) {
 //cloneObject({a:1, b:2});
 
 // Compare two CFGs
+// The two nodes are identical already
+// Compare their children
 function compare(node1, node2) {
-	console.log(node1.id + ' ' + node2.id);
+	console.log(node1.id + ' ' + node2.id + ' ' + node1.syntax.type);
 	debugger;
 	var i, j, child1, child2, findEqual, same;
 
 	same = true;
-	node1.visited = true;
+	node1.visited = node2.visited = node2.id;
 	for (i in node1.children) {
 		child1 = node1.children[i];
 		findEqual = false;	// if child1 == child2
@@ -274,7 +302,17 @@ function compare(node1, node2) {
 			}
 		}
 		if (findEqual) {
-			if (!child1.visited)
+			if (node1.syntax.type == 'SwitchCase' && 
+				node1.syntax.test == null) {
+				var cases = node2.father.children;
+				for (var i in cases) {
+					if (cases[i].visited == null) {
+						console.log('danger ' + node1.father.edges[i]);
+						same = false;
+					}
+				}
+			}
+			if (child1.visited != child2.id)
 				if (!compare(child1, child2))
 					same = false;
 		} else {

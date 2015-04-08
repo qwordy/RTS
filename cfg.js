@@ -6,7 +6,7 @@ function Node(syntax) {
 	this.edges = new Array();	// edge number
 	this.functions = {};	// store function pointers in entry node
 	this.syntax = syntax;	// syntax tree
-	this.visited = false;
+	this.visited = null;	// node2.id
 }
 
 Node.prototype = {
