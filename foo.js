@@ -1,6 +1,6 @@
 function hello() {
-	//hello();
-	a = 1;
+	hello();
+	if (0) a = 0;
 };
 
 if (1) {
@@ -9,6 +9,6 @@ if (1) {
 }
 else {
 	hello();
-	a = 1;
+	a = 2;
 }
 

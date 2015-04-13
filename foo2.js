@@ -1,11 +1,11 @@
 function hello() {
-	//hello();
-	a = 2;
+	hello();
+	if (0) a = 3;
 };
 
 if (1) {
 	hello();
-	a = 2;
+	a = 4;
 }
 else
 	hello();

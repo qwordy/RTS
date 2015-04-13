@@ -29,11 +29,13 @@ try{
 		//Node = require('./cfg').Node,
 		//compare = require('./compare').compare,
 		fs = require('fs'),
-		program1, program2, stack;
+		program1, program2, stack, _version;
 		// stack item: {type, entry, exit}
 	
+	_version = 1;	// program version
 	program1 = parse(process.argv[2]);
 	Node.id = Node.edgeId = 0;
+	_version = 2;
 	program2 = parse(process.argv[3]);
 	compare(program1, program2);
 } catch (e) {
@@ -209,15 +211,20 @@ function buildCFG(syntax, prevNode) {
 
 		endIfNode = new Node({type: 'EndIf'});	// endif node
 
-		if (syntax.consequent != null) {
+		if (syntax.consequent == null) {
+			endBodyNode = buildCFG({type: 'EmptyStatement'}, ifNode);
+		} else {
 			endBodyNode = buildCFG(syntax.consequent, ifNode);
-			endBodyNode.addNext(endIfNode);
 		}
+		endBodyNode.addNext(endIfNode);
+		
 
-		if (syntax.alternate != null) {
+		if (syntax.alternate == null) {
+			endBodyNode = buildCFG({type: 'EmptyStatement'}, ifNode);
+		} else {
 			endBodyNode = buildCFG(syntax.alternate, ifNode);
-			endBodyNode.addNext(endIfNode);
 		}
+		endBodyNode.addNext(endIfNode);
 		
 		return endIfNode;
 	
@@ -397,6 +404,7 @@ function nodesEqual(node1, node2) {
 		name2 = node2.expression.callee.name;
 		status = program1.functions[callee1.name].status;
 		if (status == 'notVisited') {
+			program1.functions[callee1.name].status = 'visited';
 			result = compare(program1.functions[callee1.name], 
 				program2.functions[name2]);
 			program1.functions[callee1.name].status = result;
