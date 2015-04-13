@@ -17,8 +17,8 @@ function hello() {
 }
 
 foo = function(){}
-console.log(hello);
-console.log(foo);
+//console.log(hello);
+//console.log(foo);
 
 s = 'asdf';
 b = {};

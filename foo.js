@@ -1,7 +1,7 @@
 function hello() {
 	hello();
 	if (0) a = 0;
-};
+}
 
 if (1) {
 	hello();

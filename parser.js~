@@ -26,7 +26,6 @@ Node.edgeId = 0;
 
 try{
 	var esprima = require('esprima'),
-		escodegen = require('escodegen'),
 		//Node = require('./cfg').Node,
 		//compare = require('./compare').compare,
 		fs = require('fs'),
@@ -47,8 +46,7 @@ try{
 
 // Return program entry
 function parse(filename) {
-	var content, options, syntax, program, programExit, src;
-
+	var content, options, syntax, program, programExit;
 	content = fs.readFileSync(filename);
 	options = {loc: true};
 	syntax = esprima.parse(content);
@@ -61,13 +59,6 @@ function parse(filename) {
 	console.log(stack);
 	//console.log(program.functions['hello']);
 	stack.pop();
-
-	// Instrumented code
-	if (_version == 1) {
-		src = escodegen.generate(syntax);
-		console.log(src);
-	}
-
 	return program;
 }
 
@@ -96,28 +87,31 @@ function parseFunction(syntax, prevNode) {
 //Syntax of console.log(nodeId)
 function logSyntax(nodeId) {
 	syntax = {
-		"type": "CallExpression",
-		"callee": {
-			"type": "MemberExpression",
-			"computed": false,
-			"object": {
-				"type": "Identifier",
-				"name": "console"
+		"type": "ExpressionStatement",
+		"expression": {
+			"type": "CallExpression",
+			"callee": {
+				"type": "MemberExpression",
+				"computed": false,
+				"object": {
+					"type": "Identifier",
+					"name": "console"
+				},
+				"property": {
+					"type": "Identifier",
+					"name": "log"
+				}
 			},
-			"property": {
-				"type": "Identifier",
-				"name": "log"
-			}
-		},
-		"arguments": [
-		{
-			"type": "Literal",
-			"value": "node" + nodeId,
-			"raw": "node" + nodeId
+			"arguments": [
+				{
+					"type": "Literal",
+					"value": nodeId,
+					"raw": String(nodeId)
+				}
+			]
 		}
-		]
+		return syntax;
 	}
-	return syntax;
 }
 
 // syntax: syntax tree
@@ -157,15 +151,13 @@ function buildCFG(syntax, prevNode) {
 	case 'ExpressionStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		if (_version == 1) {
-			syntax.expression = {
-				type: 'SequenceExpression',
-				expressions: [
-					logSyntax(node.id),
-					syntax.expression
-				]
-			};
-		}
+		syntax = {
+			type: 'SequenceExpression',
+			expressions: [
+				logSyntax(node.nodeId),
+				syntax
+			]
+		};
 		return node;
 
 	
@@ -328,18 +320,7 @@ function buildCFG(syntax, prevNode) {
 	});*/
 }
 
-// Standard object clone
-function stdCloneObject(obj) {
-	if (typeof(obj) != 'object' || obj == null)
-		return obj;
-	
-	var o = obj.constructor();
-	for (var i in obj)
-		o[i] = clone(obj[i]);
-	return o;
-}
-
-// Shadow object clone except 'body' field
+// Shadow clone object except 'body' field
 function cloneObject(obj) {
 	var o = {};
 	for (var i in obj)
@@ -347,6 +328,8 @@ function cloneObject(obj) {
 			o[i] = obj[i];
 	return o;
 }
+
+//cloneObject({a:1, b:2});
 
 // Compare two CFGs
 // The two nodes are identical already
