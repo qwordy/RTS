@@ -3,11 +3,11 @@ function Node(syntax) {
 	console.log('node' + this.id);
 	console.log(syntax);
 	this.children = new Array();	// successor
-	if (stack.length > 0)
-		this.father = stack[stack.length - 1].entry;
+	if (_stack.length > 0)
+		this.father = _stack[_stack.length - 1].entry;
 	this.edges = new Array();	// edge number
 	this.functions = {};	// store function pointers in entry node
-	this.syntax = syntax;	// syntax tree
+	this.syntax = stdCloneObject(syntax);	// syntax tree
 	this.visited = null;	// node2.id
 }
 
@@ -30,7 +30,7 @@ try{
 		//Node = require('./cfg').Node,
 		//compare = require('./compare').compare,
 		fs = require('fs'),
-		program1, program2, stack, _version;
+		program1, program2, _stack, _version;
 		// stack item: {type, entry, exit}
 	
 	_version = 1;	// program version
@@ -45,6 +45,12 @@ try{
 	process.exit(1);
 }
 
+// Instrumented filename
+// eg. foo.js -> foo_inst.js
+function instFilename(str) {
+	return str.slice(0, -3) + '_inst.js';
+}
+
 // Return program entry
 function parse(filename) {
 	var content, options, syntax, program, programExit, src;
@@ -53,19 +59,20 @@ function parse(filename) {
 	options = {loc: true};
 	syntax = esprima.parse(content);
 	console.log(JSON.stringify(syntax, null, 4));
-	stack = new Array();	// {type, entry, exit}
+	_stack = new Array();	// {type, entry, exit}
 	program = new Node({type: 'ProgramEntry'});
 	programExit = new Node({type: 'ProgramExit'});
-	stack.push({type: 'Program', entry: program, exit: programExit});
+	_stack.push({type: 'Program', entry: program, exit: programExit});
 	parseFunction(syntax, program).addNext(programExit);
-	console.log(stack);
+	//console.log(_stack);
 	//console.log(program.functions['hello']);
-	stack.pop();
+	_stack.pop();
 
 	// Instrumented code
 	if (_version == 1) {
 		src = escodegen.generate(syntax);
-		console.log(src);
+		console.log(JSON.stringify(syntax, null, 4));
+		fs.writeFileSync(filename.slice(0, -3) + '_inst.js', src);
 	}
 
 	return program;
@@ -83,10 +90,10 @@ function parseFunction(syntax, prevNode) {
 			// {'notVisited', 'visited', 'selectAll'}
 			entryNode.status = 'notVisited';
 			exitNode = new Node({type: 'FunctionExit'});
-			stack.push({type: 'Function', entry: entryNode, exit: exitNode});
+			_stack.push({type: 'Function', entry: entryNode, exit: exitNode});
 			node = parseFunction(value.body, entryNode);
 			if (node) node.addNext(exitNode);
-			stack.pop();
+			_stack.pop();
 			prevNode.functions[value.id.name] = entryNode;
 		}
 	});
@@ -140,18 +147,26 @@ function buildCFG(syntax, prevNode) {
 	case 'ReturnStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		for (var i = stack.length - 1; i--; i >= 0) {
-			if (stack[i].type == 'Function' || stack[i].type == 'Program') {
-				node.addNext(stack[i].exit);
+		for (var i = _stack.length - 1; i--; i >= 0) {
+			if (_stack[i].type == 'Function' || _stack[i].type == 'Program') {
+				node.addNext(_stack[i].exit);
 				break;
 			}
 		}
 		return null;
 
 	case 'VariableDeclaration':
+		node = new Node(syntax);
+		if (prevNode) prevNode.addNext(node);
+		return node;
+
 	case 'EmptyStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
+		if (_version == 1) {
+			syntax.type = 'ExpressionStatement';
+			syntax.expression = logSyntax(node.id);
+		}
 		return node;
 
 	case 'ExpressionStatement':
@@ -180,12 +195,12 @@ function buildCFG(syntax, prevNode) {
 		endForNode = new Node({type: 'EndFor'});
 		forNode.addNext(endForNode);
 
-		stack.push({type: 'For', entry: forNode, exit: endForNode});
+		_stack.push({type: 'For', entry: forNode, exit: endForNode});
 
 		bodyEndNode = buildCFG(syntax.body, forNode);	// body end node
 		if (bodyEndNode) bodyEndNode.addNext(forNode);
 
-		stack.pop();
+		_stack.pop();
 		return endForNode;
 	
 	case 'WhileStatement':
@@ -197,12 +212,12 @@ function buildCFG(syntax, prevNode) {
 		endWhileNode = new Node({type: 'EndWhile'});
 		whileNode.addNext(endWhileNode);
 
-		stack.push({type: 'While', entry: whileNode, exit: endWhileNode});
+		_stack.push({type: 'While', entry: whileNode, exit: endWhileNode});
 
 		bodyEndNode = buildCFG(syntax.body, whileNode);
 		if (bodyEndNode) bodyEndNode.addNext(whileNode);
 
-		stack.pop();
+		_stack.pop();
 		return endWhileNode;
 	
 	// bodyEnd -> while, while -> do
@@ -215,21 +230,21 @@ function buildCFG(syntax, prevNode) {
 		whileNode = new Node(cloneObject(syntax));
 		whileNode.addNext(doNode);
 
-		stack.push({type: 'DoWhile', entry: doNode, exit: whileNode});
+		_stack.push({type: 'DoWhile', entry: doNode, exit: whileNode});
 
 		bodyEndNode = buildCFG(syntax.body, doNode);
 		if (bodyEndNode) bodyEndNode.addNext(whileNode);
 
-		stack.pop();
+		_stack.pop();
 		return whileNode;
 
 	// Find the nearest iteration in stack
 	case 'BreakStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		for (var i = stack.length - 1; i >= 0; i--) {
-			if (['For', 'While', 'Do', 'Switch'].indexOf(stack[i].type) != -1) {
-				node.addNext(stack[i].exit);
+		for (var i = _stack.length - 1; i >= 0; i--) {
+			if (['For', 'While', 'Do', 'Switch'].indexOf(_stack[i].type) != -1) {
+				node.addNext(_stack[i].exit);
 				break;
 			}
 		}
@@ -238,12 +253,12 @@ function buildCFG(syntax, prevNode) {
 	case 'ContinueStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		for (var i = stack.length - 1; i >= 0; i--) {
-			if (stack[i].type == 'For' || stack[i].type == 'While') {
-				node.addNext(stack[i].entry);
+		for (var i = _stack.length - 1; i >= 0; i--) {
+			if (_stack[i].type == 'For' || _stack[i].type == 'While') {
+				node.addNext(_stack[i].entry);
 				break;
-			} else if (stack[i].type == 'Do') {
-				node.addNext(stack[i].exit);
+			} else if (_stack[i].type == 'Do') {
+				node.addNext(_stack[i].exit);
 				break;
 			}
 		}
@@ -290,7 +305,7 @@ function buildCFG(syntax, prevNode) {
 
 		endSwitchNode = new Node({type: 'EndSwitch'});
 
-		stack.push({type: 'Switch', entry: switchNode, exit: endSwitchNode});
+		_stack.push({type: 'Switch', entry: switchNode, exit: endSwitchNode});
 
 		node = null;
 		syntax.cases.forEach(function(value) {
@@ -311,7 +326,7 @@ function buildCFG(syntax, prevNode) {
 
 		if (node) node.addNext(endSwitchNode);
 
-		stack.pop();
+		_stack.pop();
 		return endSwitchNode;
 
 	case 'FunctionDeclaration':
@@ -335,7 +350,7 @@ function stdCloneObject(obj) {
 	
 	var o = obj.constructor();
 	for (var i in obj)
-		o[i] = clone(obj[i]);
+		o[i] = stdCloneObject(obj[i]);
 	return o;
 }
 
