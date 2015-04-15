@@ -72,7 +72,8 @@ function parse(filename) {
 	if (_version == 1) {
 		src = escodegen.generate(syntax);
 		console.log(JSON.stringify(syntax, null, 4));
-		fs.writeFileSync(filename.slice(0, -3) + '_inst.js', src);
+		fs.writeFileSync(filename.slice(0, -3) + '_inst.js', 
+			src + '\n' + JSON.stringify(syntax, null, 4));
 	}
 
 	return program;
@@ -278,16 +279,30 @@ function buildCFG(syntax, prevNode) {
 
 		if (syntax.consequent == null) {
 			endBodyNode = buildCFG({type: 'EmptyStatement'}, ifNode);
+			syntax.consequent = {type: 'EmptyStatement'};
 		} else {
 			endBodyNode = buildCFG(syntax.consequent, ifNode);
+			if (syntax.consequent.type != 'BlockStatement') {
+				syntax.consequent = {
+					type: 'BlockStatement',
+					body: [syntax.consequent]
+				};
+			}
 		}
 		endBodyNode.addNext(endIfNode);
 		
 
 		if (syntax.alternate == null) {
 			endBodyNode = buildCFG({type: 'EmptyStatement'}, ifNode);
+			syntax.alternate = {type: 'EmptyStatement'};
 		} else {
 			endBodyNode = buildCFG(syntax.alternate, ifNode);
+			if (syntax.alternate.type != 'BlockStatement') {
+				syntax.alternate = {
+					type: 'BlockStatement',
+					body: [syntax.alternate]
+				};
+			}
 		}
 		endBodyNode.addNext(endIfNode);
 		
