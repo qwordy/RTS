@@ -24,20 +24,75 @@ Node.prototype = {
 Node.id = 0;
 Node.edgeId = 0;
 
+function EdgeCoverage() {
+	this.selectedEdges = {};	// {edgeId1: 1, edgeId2: 1, ...}
+	this.current = program1;	// currentNode when infer
+	this.infer();
+	console.log(this.selectedEdges);
+}
+
+// Infer edges coverage from log
+EdgeCoverage.prototype.infer = function() {
+	var execSync, log, tokens, i, nodeId;
+
+	execSync = require('child_process').execSync;
+	log = execSync('node ' + instFilename(process.argv[2])).toString();
+	tokens = log.split(/[ \n]/g);
+	for (i = 0; i < tokens.length; i++) {
+		if (tokens[i] == 'node') {
+			nodeId = Number(tokens[i+1]);
+			//console.log(nodeId);
+			i++;
+			if (nodeId >= 0)
+				while (this.findChild(nodeId) == false);
+		}
+	}
+}
+
+// findChild.current is initialized program1's ProgramEntry
+// Return true if find child.id == nodeId
+EdgeCoverage.prototype.findChild = function (nodeId) {
+	var i, node;
+
+	node = this.current;
+	console.log(node.id + ' ' + nodeId);
+	for (i in node.children) {
+		if (node.children[i].id == nodeId) {
+			this.selectedEdges[node.edges[i]] = 1;
+			this.current = node.children[i];
+			return true;
+		}
+	}
+	if (node.children.length == 1) {
+		this.selectedEdges[node.edges[0]] = 1;
+		this.current = node.children[0];
+	} else if (node.syntax.type == 'ForStatement' ||
+		node.syntax.type == 'ForInStatement') {
+		this.selectedEdges[node.edges[0]] = 1;
+		this.current = node.children[0];
+	}
+	return false;
+}
+
 try{
 	var esprima = require('esprima'),
 		escodegen = require('escodegen'),
 		//Node = require('./cfg').Node,
 		//compare = require('./compare').compare,
 		fs = require('fs'),
-		program1, program2, _stack, _version;
-		// stack item: {type, entry, exit}
+		program1, program2, edgeCoverage,
+		_stack, _blockStack,  _version;
+		// stack item: {type, entry, exit}, program, function, loop, switch
+		// blockStack item: {body, index}
 	
 	_version = 1;	// program version
 	program1 = parse(process.argv[2]);
+	edgeCoverage = new EdgeCoverage();
+
 	Node.id = Node.edgeId = 0;
 	_version = 2;
 	program2 = parse(process.argv[3]);
+
 	compare(program1, program2);
 } catch (e) {
 	//console.log(e.message);
@@ -56,9 +111,11 @@ function parse(filename) {
 	var content, options, syntax, program, programExit, src;
 
 	content = fs.readFileSync(filename);
-	options = {loc: true};
+	options = {range: true};
 	syntax = esprima.parse(content);
 	console.log(JSON.stringify(syntax, null, 4));
+	if (_version == 1)
+		_blockStack = new Array();
 	_stack = new Array();	// {type, entry, exit}
 	program = new Node({type: 'ProgramEntry'});
 	programExit = new Node({type: 'ProgramExit'});
@@ -71,9 +128,9 @@ function parse(filename) {
 	// Instrumented code
 	if (_version == 1) {
 		src = escodegen.generate(syntax);
-		console.log(JSON.stringify(syntax, null, 4));
-		fs.writeFileSync(filename.slice(0, -3) + '_inst.js', 
-			src + '\n' + JSON.stringify(syntax, null, 4));
+		//console.log(JSON.stringify(syntax, null, 4));
+		fs.writeFileSync(instFilename(filename), src);
+		// + '\n' + JSON.stringify(syntax, null, 4));
 	}
 
 	return program;
@@ -101,9 +158,18 @@ function parseFunction(syntax, prevNode) {
 	return buildCFG(syntax, prevNode);
 }
 
-//Syntax of console.log(nodeId)
-function logSyntax(nodeId) {
-	syntax = {
+// Syntax of console.log(nodeId);
+function logStmtSyntax(nodeId) {
+	var syntax = {
+		type: 'ExpressionStatement',
+		expression: logExpSyntax(nodeId)
+	}
+	return syntax;
+}
+
+// Syntax of console.log(nodeId)
+function logExpSyntax(nodeId) {
+	var syntax = {
 		"type": "CallExpression",
 		"callee": {
 			"type": "MemberExpression",
@@ -118,14 +184,30 @@ function logSyntax(nodeId) {
 			}
 		},
 		"arguments": [
-		{
-			"type": "Literal",
-			"value": "node" + nodeId,
-			"raw": "node" + nodeId
-		}
+			{
+				"type": "Literal",
+				"value": "node " + nodeId,
+				"raw": "node " + nodeId
+			}
 		]
 	}
 	return syntax;
+}
+
+// Insert a log statement before a node
+function insertLog(nodeId) {
+	var item = _blockStack[_blockStack.length - 1];
+	item.body.splice(item.index, 0, logStmtSyntax(nodeId));
+	//console.log('insertLog' + nodeId +
+	//	' blockStackSize' + _blockStack.length);
+}	
+
+// Only clone references
+function bodyClone(body) {
+	var body2 = [];
+	for (var i in body)
+		body2.push(body[i]);
+	return body2;
 }
 
 // syntax: syntax tree
@@ -139,53 +221,72 @@ function buildCFG(syntax, prevNode) {
 	case 'Program':
 	case 'BlockStatement':
 		node = prevNode;
-		for (var i in syntax.body) {
+		if (_version == 1) {
+			var item = {body: syntax.body, index: 0};
+			_blockStack.push(item);
+		}
+		
+		var i = 0;
+		while (i < syntax.body.length) {
 			node = buildCFG(syntax.body[i], node);
 			if (node == null) break;
+			if (_version == 1) {
+				item.index += 2;
+				i++;
+				//console.log('i' + i);
+				//console.log('index' + item.index);
+			}
+			i++;
 		}
+		if (_version == 1) _blockStack.pop();
 		return node;
 
 	case 'ReturnStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
+		
+		if (_version == 1) insertLog(node.id);
+		
 		for (var i = _stack.length - 1; i--; i >= 0) {
 			if (_stack[i].type == 'Function' || _stack[i].type == 'Program') {
 				node.addNext(_stack[i].exit);
 				break;
 			}
 		}
+
 		return null;
 
 	case 'VariableDeclaration':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
+		if (_version == 1) insertLog(node.id);
 		return node;
 
 	case 'EmptyStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		if (_version == 1) {
-			syntax.type = 'ExpressionStatement';
-			syntax.expression = logSyntax(node.id);
-		}
+		if (_version == 1) insertLog(node.id);
 		return node;
 
 	case 'ExpressionStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
-		if (_version == 1) {
+		if (_version == 1) insertLog(node.id);
+		/*if (_version == 1) {
 			syntax.expression = {
 				type: 'SequenceExpression',
 				expressions: [
-					logSyntax(node.id),
+					logExpSyntax(node.id),
 					syntax.expression
 				]
 			};
-		}
+		}*/
 		return node;
 
 	
 	// for -> endFor, bodyEnd -> for
+	// for.children[0] = endFor
+	// for.children[1] = 
 	case 'ForStatement':
 	case 'ForInStatement':
 		var forNode, endForNode, bodyEndNode;
@@ -193,10 +294,19 @@ function buildCFG(syntax, prevNode) {
 		forNode = new Node(cloneObject(syntax));	// for head node
 		if (prevNode) prevNode.addNext(forNode);
 
+		if (_version == 1) insertLog(forNode.id);
+
 		endForNode = new Node({type: 'EndFor'});
 		forNode.addNext(endForNode);
 
 		_stack.push({type: 'For', entry: forNode, exit: endForNode});
+
+		if (_version == 1 && syntax.body.type != 'BlockStatement') {
+			syntax.body = {
+				type: 'BlockStatement',
+				body: [syntax.body]
+			};
+		}
 
 		bodyEndNode = buildCFG(syntax.body, forNode);	// body end node
 		if (bodyEndNode) bodyEndNode.addNext(forNode);
@@ -210,14 +320,23 @@ function buildCFG(syntax, prevNode) {
 		whileNode = new Node(cloneObject(syntax));
 		if (prevNode) prevNode.addNext(whileNode);
 
+		if (_version == 1) insertLog(whileNode.id);
+
 		endWhileNode = new Node({type: 'EndWhile'});
 		whileNode.addNext(endWhileNode);
 
 		_stack.push({type: 'While', entry: whileNode, exit: endWhileNode});
 
+		if (_version == 1 && syntax.body.type != 'BlockStatement') {
+			syntax.body = {
+				type: 'BlockStatement',
+				body: [syntax.body]
+			};
+		}
+
 		bodyEndNode = buildCFG(syntax.body, whileNode);
 		if (bodyEndNode) bodyEndNode.addNext(whileNode);
-
+		
 		_stack.pop();
 		return endWhileNode;
 	
@@ -228,14 +347,23 @@ function buildCFG(syntax, prevNode) {
 		doNode = new Node({type: 'Do'});
 		if (prevNode) prevNode.addNext(doNode);
 
+		if (_version == 1) insertLog(doNode.id);
+
 		whileNode = new Node(cloneObject(syntax));
 		whileNode.addNext(doNode);
 
 		_stack.push({type: 'DoWhile', entry: doNode, exit: whileNode});
 
+		if (_version == 1 && syntax.body.type != 'BlockStatement') {
+			syntax.body = {
+				type: 'BlockStatement',
+				body: [syntax.body]
+			};
+		}
+
 		bodyEndNode = buildCFG(syntax.body, doNode);
 		if (bodyEndNode) bodyEndNode.addNext(whileNode);
-
+		
 		_stack.pop();
 		return whileNode;
 
@@ -243,6 +371,7 @@ function buildCFG(syntax, prevNode) {
 	case 'BreakStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
+		if (_version == 1) insertLog(node.id)
 		for (var i = _stack.length - 1; i >= 0; i--) {
 			if (['For', 'While', 'Do', 'Switch'].indexOf(_stack[i].type) != -1) {
 				node.addNext(_stack[i].exit);
@@ -254,6 +383,7 @@ function buildCFG(syntax, prevNode) {
 	case 'ContinueStatement':
 		node = new Node(syntax);
 		if (prevNode) prevNode.addNext(node);
+		if (_version == 1) insertLog(node.id)
 		for (var i = _stack.length - 1; i >= 0; i--) {
 			if (_stack[i].type == 'For' || _stack[i].type == 'While') {
 				node.addNext(_stack[i].entry);
@@ -275,36 +405,43 @@ function buildCFG(syntax, prevNode) {
 		ifNode = new Node(ifSyntax);	// if head node
 		if (prevNode) prevNode.addNext(ifNode);
 
+		if (_version == 1) insertLog(ifNode.id);
+
 		endIfNode = new Node({type: 'EndIf'});	// endif node
 
 		if (syntax.consequent == null) {
-			endBodyNode = buildCFG({type: 'EmptyStatement'}, ifNode);
-			syntax.consequent = {type: 'EmptyStatement'};
-		} else {
+			syntax.consequent = {
+				type: 'BlockStatement',
+				body: [{type: 'EmptyStatement'}]
+			};
 			endBodyNode = buildCFG(syntax.consequent, ifNode);
-			if (syntax.consequent.type != 'BlockStatement') {
+		} else {
+			if (_version == 1 && syntax.consequent.type != 'BlockStatement') {
 				syntax.consequent = {
 					type: 'BlockStatement',
 					body: [syntax.consequent]
 				};
 			}
+			endBodyNode = buildCFG(syntax.consequent, ifNode);
 		}
-		endBodyNode.addNext(endIfNode);
-		
+		if (endBodyNode) endBodyNode.addNext(endIfNode);	
 
 		if (syntax.alternate == null) {
-			endBodyNode = buildCFG({type: 'EmptyStatement'}, ifNode);
-			syntax.alternate = {type: 'EmptyStatement'};
-		} else {
+			syntax.alternate = {
+				type: 'BlockStatement',
+				body: [{type: 'EmptyStatement'}]
+			};
 			endBodyNode = buildCFG(syntax.alternate, ifNode);
-			if (syntax.alternate.type != 'BlockStatement') {
+		} else {
+			if (_version == 1 && syntax.alternate.type != 'BlockStatement') {
 				syntax.alternate = {
 					type: 'BlockStatement',
 					body: [syntax.alternate]
 				};
 			}
+			endBodyNode = buildCFG(syntax.alternate, ifNode);
 		}
-		endBodyNode.addNext(endIfNode);
+		if (endBodyNode) endBodyNode.addNext(endIfNode);
 		
 		return endIfNode;
 	
@@ -317,6 +454,8 @@ function buildCFG(syntax, prevNode) {
 
 		switchNode = new Node(switchSyntax);
 		if (prevNode) prevNode.addNext(switchNode);
+
+		if (_version == 1) insertLog(switchNode.id);
 
 		endSwitchNode = new Node({type: 'EndSwitch'});
 
@@ -346,6 +485,7 @@ function buildCFG(syntax, prevNode) {
 
 	case 'FunctionDeclaration':
 		//console.log(node);
+		if (_version == 1) insertLog(-1);
 		return prevNode;
 	}
 
@@ -360,12 +500,15 @@ function buildCFG(syntax, prevNode) {
 
 // Standard object clone
 function stdCloneObject(obj) {
+	//console.log('clone ' + JSON.stringify(obj));
 	if (typeof(obj) != 'object' || obj == null)
 		return obj;
 	
 	var o = obj.constructor();
-	for (var i in obj)
+	for (var i in obj) {
+		//console.log('\t ' + i + ' ' + JSON.stringify(obj[i]));
 		o[i] = stdCloneObject(obj[i]);
+	}
 	return o;
 }
 

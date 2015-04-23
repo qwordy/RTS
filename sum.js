@@ -6,10 +6,9 @@ for (i in a) {
 		process.exit(1);
 	else
 		s += a[i];
-	break;
 }
 console.log(s);
-hello();
+//hello();
 
 function hello() {
 	return;
