@@ -33,7 +33,7 @@ function EdgeCoverage() {
 
 // Infer edges coverage from log
 EdgeCoverage.prototype.infer = function() {
-	var execSync, log, tokens, i, nodeId;
+	var execSync, log, tokens, i, nodeId, current;
 
 	execSync = require('child_process').execSync;
 	log = execSync('node ' + instFilename(process.argv[2])).toString();
@@ -47,6 +47,10 @@ EdgeCoverage.prototype.infer = function() {
 				while (this.findChild(nodeId) == false);
 		}
 	}
+	do {
+		current = this.current;
+		this.findChild(-2);
+	} while (this.current != current);
 }
 
 // findChild.current is initialized program1's ProgramEntry
@@ -67,9 +71,19 @@ EdgeCoverage.prototype.findChild = function (nodeId) {
 		this.selectedEdges[node.edges[0]] = 1;
 		this.current = node.children[0];
 	} else if (node.syntax.type == 'ForStatement' ||
-		node.syntax.type == 'ForInStatement') {
+		node.syntax.type == 'ForInStatement' ||
+		node.syntax.type == 'WhileStatement') {
 		this.selectedEdges[node.edges[0]] = 1;
 		this.current = node.children[0];
+	} else if (node.syntax.type == 'SwitchStatement') {
+		for (i in node.children) {
+			if (node.children[i].children[0].id == nodeId) {
+				this.selectedEdges[node.edges[i]] = 1;
+				this.selectedEdges[node.children[i].edges[0]] = 1;
+				this.current = node.children[i].children[0];
+				return true;
+			}
+		}
 	}
 	return false;
 }
@@ -238,6 +252,7 @@ function buildCFG(syntax, prevNode) {
 			}
 			i++;
 		}
+
 		if (_version == 1) _blockStack.pop();
 		return node;
 
@@ -314,6 +329,7 @@ function buildCFG(syntax, prevNode) {
 		_stack.pop();
 		return endForNode;
 	
+	// Similar to For
 	case 'WhileStatement':
 		var whileNode, endWhileNode, bodyEndNode;
 
@@ -472,10 +488,23 @@ function buildCFG(syntax, prevNode) {
 			if (node) node.addNext(caseNode);
 
 			node = caseNode;
-			for (var i in value.consequent) {
+			if (_version == 1) {
+				var item = {body: value.consequent, index: 0};
+				_blockStack.push(item);
+			}
+			
+			var i = 0;
+			while (i < value.consequent.length) {
 				node = buildCFG(value.consequent[i], node);
 				if (node == null) break;
+				if (_version == 1) {
+					item.index += 2;
+					i++;
+				}
+				i++;
 			}
+
+			if (_version == 1) _blockStack.pop();
 		});
 
 		if (node) node.addNext(endSwitchNode);
