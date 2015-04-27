@@ -12,6 +12,7 @@ for (i in a) {
 }*/
 a = 0;
 do {
+	//break;
 	a++;
 } while (a < 4);
 

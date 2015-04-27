@@ -23,3 +23,4 @@ if (1) {
     console.log('node 14');
     a = 2;
 }
+console.log('node 1');

@@ -39,3 +39,4 @@ console.log('node 18');
 b[s] = 1;
 console.log('node 19');
 console.log(b);
+console.log('node 1');

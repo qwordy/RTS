@@ -13,3 +13,4 @@ default:
     console.log('node 10');
     console.log(0);
 }
+console.log('node 1');

@@ -47,13 +47,16 @@ EdgeCoverage.prototype.infer = function() {
 				while (this.findChild(nodeId) == false);
 		}
 	}
+
+	//console.log('no log left');
+	// No log left, but still some edges
 	do {
 		current = this.current;
-		this.findChild(-2);
+		this.findChild(-2);	// -2 means no log left
 	} while (this.current != current);
 }
 
-// findChild.current is initialized program1's ProgramEntry
+// FindChild.current is initialized program1's ProgramEntry
 // Return true if find child.id == nodeId
 EdgeCoverage.prototype.findChild = function (nodeId) {
 	var i, node;
@@ -84,7 +87,22 @@ EdgeCoverage.prototype.findChild = function (nodeId) {
 				return true;
 			}
 		}
+	} else if (node.syntax.type == 'DoWhileStatement') {
+		// Do
+		if (node.children[0].children[0].id == nodeId) {
+			this.selectedEdges[node.edges[0]] = 1;
+			this.selectedEdges[node.children[0].edges[0]] = 1;
+			this.current = node.children[0].children[0];
+			return true;
+		} else if (node.children[1].children[0].id == nodeId) {
+		// Out of the DoWhile
+			this.selectedEdges[node.edges[1]] = 1;
+			this.selectedEdges[node.children[1].edges[0]] = 1;
+			this.current = node.children[1].children[0];
+			return true;
+		}
 	}
+
 	return false;
 }
 
@@ -141,6 +159,9 @@ function parse(filename) {
 
 	// Instrumented code
 	if (_version == 1) {
+		// Add console.log(1) to log ProgramExit
+		syntax.body.push(logStmtSyntax(1));
+
 		src = escodegen.generate(syntax);
 		//console.log(JSON.stringify(syntax, null, 4));
 		fs.writeFileSync(instFilename(filename), src);
@@ -356,9 +377,9 @@ function buildCFG(syntax, prevNode) {
 		_stack.pop();
 		return endWhileNode;
 	
-	// bodyEnd -> while, while -> do
+	// bodyEnd -> while, while -> do, while -> endDo
 	case 'DoWhileStatement':
-		var doNode, whileNode, bodyEndNode;
+		var doNode, whileNode, bodyEndNode, endDoNode;
 
 		doNode = new Node({type: 'Do'});
 		if (prevNode) prevNode.addNext(doNode);
@@ -368,7 +389,10 @@ function buildCFG(syntax, prevNode) {
 		whileNode = new Node(cloneObject(syntax));
 		whileNode.addNext(doNode);
 
-		_stack.push({type: 'DoWhile', entry: doNode, exit: whileNode});
+		endDoNode = new Node({type: 'EndDo'});
+		whileNode.addNext(endDoNode);
+
+		_stack.push({type: 'Do', entry: doNode, exit: endDoNode, doCond: whileNode});
 
 		if (_version == 1 && syntax.body.type != 'BlockStatement') {
 			syntax.body = {
@@ -381,7 +405,7 @@ function buildCFG(syntax, prevNode) {
 		if (bodyEndNode) bodyEndNode.addNext(whileNode);
 		
 		_stack.pop();
-		return whileNode;
+		return endDoNode;
 
 	// Find the nearest iteration in stack
 	case 'BreakStatement':
@@ -405,7 +429,7 @@ function buildCFG(syntax, prevNode) {
 				node.addNext(_stack[i].entry);
 				break;
 			} else if (_stack[i].type == 'Do') {
-				node.addNext(_stack[i].exit);
+				node.addNext(_stack[i].doCond);
 				break;
 			}
 		}
