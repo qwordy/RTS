@@ -111,10 +111,6 @@ function CallGraph(filename) {
 	// If c, d == 0, a-b has multiple callees
 	this.edges = [];
 
-	// Function pointers
-	// [a, b] : function node
-	this.fps = {};
-
 	this.parse(filename);
 }
 
@@ -161,60 +157,34 @@ CallGraph.prototype.parse = function(filename) {
 
 		i++;
 	}
+	console.log(this.edges);
 }
 
-try{
-	var esprima = require('esprima'),
-		escodegen = require('escodegen'),
-		//Node = require('./cfg').Node,
-		//compare = require('./compare').compare,
-		fs = require('fs'),
-		program1, program2, edgeCoverage, callGraph,
-		_stack, _blockStack,  _version;
-		// stack item: {type, entry, exit}, program, function, loop, switch
-		// blockStack item: {body, index}
-	
-	_version = 1;	// program version
-	callGraph1 = new CallGraph(process.argv[2]);
-	program1 = parse(process.argv[2], callGraph1.fps);
-	console.log(callGraph1.edges);
-	console.log(callGraph1.fps);
-	edgeCoverage = new EdgeCoverage();
+function CFG(filename) {
+	// Function pointers
+	// [a, b] : function node
+	this.fps = {};
 
-	Node.id = Node.edgeId = 0;
-	_version = 2;
-	callGraph2 = new CallGraph(process.argv[3]);
-	program2 = parse(process.argv[3], callGraph2.fps);
-
-	compare(program1, program2);
-} catch (e) {
-	//console.log(e.message);
-	console.log(e.stack);
-	process.exit(1);
+	this.programEntry = this.parse(filename);
 }
 
 // Return program entry
-function parse(filename, fps) {
+function parse(filename) {
 	var content, options, syntax, program, programExit, src;
 
 	content = fs.readFileSync(filename);
 	options = {range: true};
 	syntax = esprima.parse(content, options);
 	console.log(JSON.stringify(syntax, null, 4));
-
 	if (_version == 1)
 		_blockStack = new Array();
 	_stack = new Array();	// {type, entry, exit}
-
 	program = new Node({type: 'ProgramEntry'});
 	programExit = new Node({type: 'ProgramExit'});
-
 	_stack.push({type: 'Program', entry: program, exit: programExit});
-
-	parseFunction(syntax, program, fps).addNext(programExit);
+	this.parseFunction(syntax, program).addNext(programExit);
 	//console.log(_stack);
 	//console.log(program.functions['hello']);
-
 	_stack.pop();
 
 	// Instrumented code
@@ -229,80 +199,6 @@ function parse(filename, fps) {
 	}
 
 	return program;
-}
-
-// Parse functions first, then build CFG
-// Store function pointer in prevNode
-// Return the last node in CFG
-// No nested functions
-function parseFunction(syntax, prevNode, fps) {
-	var entryNode, exitNode, node;
-	syntax.body.forEach(function(value) {
-		if (value.type == 'FunctionDeclaration') {
-			entryNode = new Node(cloneObject(value));	// function head
-			fps[value.range] = entryNode;
-
-			// {'notVisited', 'visited', 'selectAll'}
-			entryNode.status = 'notVisited';
-			exitNode = new Node({type: 'FunctionExit'});
-			_stack.push({type: 'Function', entry: entryNode, exit: exitNode});
-			node = parseFunction(value.body, entryNode, fps);
-			if (node) node.addNext(exitNode);
-			_stack.pop();
-			prevNode.functions[value.id.name] = entryNode;
-		}
-	});
-	return buildCFG(syntax, prevNode);
-}
-
-// Instrumented filename
-// eg. foo.js -> foo_inst.js
-function instFilename(str) {
-	return str.slice(0, -3) + '_inst.js';
-}
-
-// Syntax of console.log(nodeId);
-function logStmtSyntax(nodeId) {
-	var syntax = {
-		type: 'ExpressionStatement',
-		expression: logExpSyntax(nodeId)
-	}
-	return syntax;
-}
-
-// Syntax of console.log(nodeId)
-function logExpSyntax(nodeId) {
-	var syntax = {
-		"type": "CallExpression",
-		"callee": {
-			"type": "MemberExpression",
-			"computed": false,
-			"object": {
-				"type": "Identifier",
-				"name": "console"
-			},
-			"property": {
-				"type": "Identifier",
-				"name": "log"
-			}
-		},
-		"arguments": [
-			{
-				"type": "Literal",
-				"value": "node " + nodeId,
-				"raw": "node " + nodeId
-			}
-		]
-	}
-	return syntax;
-}
-
-// Insert a log statement before a node
-function insertLog(nodeId) {
-	var item = _blockStack[_blockStack.length - 1];
-	item.body.splice(item.index, 0, logStmtSyntax(nodeId));
-	//console.log('insertLog' + nodeId +
-	//	' blockStackSize' + _blockStack.length);
 }
 
 // syntax: syntax tree
@@ -378,6 +274,7 @@ function buildCFG(syntax, prevNode) {
 			};
 		}*/
 		return node;
+
 	
 	// for -> endFor, bodyEnd -> for
 	// for.children[0] = endFor
@@ -609,6 +506,107 @@ function buildCFG(syntax, prevNode) {
 		console.log(value);
 	});*/
 }
+
+// Parse functions first, then build CFG
+// Store function pointer in prevNode
+// Return the last node in CFG
+// No nested functions
+function parseFunction(syntax, prevNode) {
+	var entryNode, exitNode, node;
+	syntax.body.forEach(function(value) {
+		if (value.type == 'FunctionDeclaration') {
+			entryNode = new Node(cloneObject(value));	// function head
+
+			// {'notVisited', 'visited', 'selectAll'}
+			entryNode.status = 'notVisited';
+			exitNode = new Node({type: 'FunctionExit'});
+			_stack.push({type: 'Function', entry: entryNode, exit: exitNode});
+			node = parseFunction(value.body, entryNode);
+			if (node) node.addNext(exitNode);
+			_stack.pop();
+			prevNode.functions[value.id.name] = entryNode;
+		}
+	});
+	return buildCFG(syntax, prevNode);
+}
+
+try{
+	var esprima = require('esprima'),
+		escodegen = require('escodegen'),
+		//Node = require('./cfg').Node,
+		//compare = require('./compare').compare,
+		fs = require('fs'),
+		program1, program2, edgeCoverage, callGraph,
+		_stack, _blockStack,  _version;
+		// stack item: {type, entry, exit}, program, function, loop, switch
+		// blockStack item: {body, index}
+	
+	_version = 1;	// program version
+	cfg1 = new CFG(process.argv[2]);
+	callGraph1 = new CallGraph(process.argv[2]);
+	edgeCoverage = new EdgeCoverage();
+
+	Node.id = Node.edgeId = 0;
+	_version = 2;
+	cfg2 = new CFG(process.argv[3]);
+	callGraph2 = new CallGraph(process.argv[3]);
+
+	compare(program1, program2);
+} catch (e) {
+	//console.log(e.message);
+	console.log(e.stack);
+	process.exit(1);
+}
+
+// Instrumented filename
+// eg. foo.js -> foo_inst.js
+function instFilename(str) {
+	return str.slice(0, -3) + '_inst.js';
+}
+
+// Syntax of console.log(nodeId);
+function logStmtSyntax(nodeId) {
+	var syntax = {
+		type: 'ExpressionStatement',
+		expression: logExpSyntax(nodeId)
+	}
+	return syntax;
+}
+
+// Syntax of console.log(nodeId)
+function logExpSyntax(nodeId) {
+	var syntax = {
+		"type": "CallExpression",
+		"callee": {
+			"type": "MemberExpression",
+			"computed": false,
+			"object": {
+				"type": "Identifier",
+				"name": "console"
+			},
+			"property": {
+				"type": "Identifier",
+				"name": "log"
+			}
+		},
+		"arguments": [
+			{
+				"type": "Literal",
+				"value": "node " + nodeId,
+				"raw": "node " + nodeId
+			}
+		]
+	}
+	return syntax;
+}
+
+// Insert a log statement before a node
+function insertLog(nodeId) {
+	var item = _blockStack[_blockStack.length - 1];
+	item.body.splice(item.index, 0, logStmtSyntax(nodeId));
+	//console.log('insertLog' + nodeId +
+	//	' blockStackSize' + _blockStack.length);
+}	
 
 // Only clone references
 function bodyClone(body) {

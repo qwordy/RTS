@@ -1,0 +1,7 @@
+Regression Test Selection
+yfy
+
+建立CFG
+使用一个栈来保存当前的上下文，每一帧保存类型，入口和出口
+对于一个程序，建立ProgramEntry结点和ProgramExit结点
+对于switch语句，每一个case会连出一条边
