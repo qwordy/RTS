@@ -1,10 +1,9 @@
-a.a;
 function hello() {
 	function c(x){}
 	a = 1;
 }
 hello();
-b();
+b() + hello();
 function b() {
 	hello();
 }

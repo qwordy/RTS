@@ -1,3 +1,5 @@
+'use strict';
+
 function Node(syntax) {
 	this.id = Node.id++;
 	console.log('node' + this.id);
@@ -27,6 +29,14 @@ Node.edgeId = 0;
 function EdgeCoverage() {
 	this.selectedEdges = {};	// {edgeId1: 1, edgeId2: 1, ...}
 	this.current = program1;	// currentNode when infer
+
+	// Caller node [node, index]
+	// current: caller node
+	// index: the next callEdge to visit
+	this.callStack = [];	
+
+	this.index = 0;	// Traverse callEdges from the index-th
+
 	this.infer();
 	console.log(this.selectedEdges);
 }
@@ -59,31 +69,66 @@ EdgeCoverage.prototype.infer = function() {
 // FindChild.current is initialized program1's ProgramEntry
 // Return true if find child.id == nodeId
 EdgeCoverage.prototype.findChild = function(nodeId) {
-	var i, node;
+	var i, node, edge, fp, range;
 
 	node = this.current;
 	console.log(node.id + ' ' + nodeId);
+	//if (node.id == 64) process.exit(1);
 	for (i in node.children) {
 		if (node.children[i].id == nodeId) {
 			this.selectedEdges[node.edges[i]] = 1;
 			this.current = node.children[i];
+			this.index = 0;
 			return true;
 		}
 	}
-	if (node.children.length == 1) {
+
+	// Call
+	range = node.syntax.range;
+	if (range != undefined) {
+		for (i = this.index; i < callGraph1.edges.length; i++) {
+			edge = callGraph1.edges[i];
+			if (edge[0] > range[1])
+				break;
+			if (edge[0] >= range[0] && edge[1] <= range[1]) {
+				if (edge[2] == 0 && edge[3] == 0) {
+				} else {
+					fp = callGraph1.fps[[edge[2], edge[3]]];
+					if (fp != undefined) {
+						console.log('enter function ' + fp.syntax.range);
+						this.callStack.push([this.current, i + 1]);
+						this.current = fp;
+						this.index = 0;
+						return false;
+					}
+				}
+			}
+		}
+	}
+
+	if (node.children.length == 0) {
+		if (node.syntax.type == 'FunctionExit') {
+			var item = this.callStack.pop();
+			this.current = item[0];
+			this.index = item[1];
+		}
+	} else if (node.children.length == 1) {
 		this.selectedEdges[node.edges[0]] = 1;
 		this.current = node.children[0];
+		this.index = 0;
 	} else if (node.syntax.type == 'ForStatement' ||
 		node.syntax.type == 'ForInStatement' ||
 		node.syntax.type == 'WhileStatement') {
-		this.selectedEdges[node.edges[0]] = 1;
+		this.selectedEdges[node.edges[0]] = 1;	// For -> endFor
 		this.current = node.children[0];
+		this.index = 0;
 	} else if (node.syntax.type == 'SwitchStatement') {
 		for (i in node.children) {
 			if (node.children[i].children[0].id == nodeId) {
 				this.selectedEdges[node.edges[i]] = 1;
 				this.selectedEdges[node.children[i].edges[0]] = 1;
 				this.current = node.children[i].children[0];
+				this.index = 0;
 				return true;
 			}
 		}
@@ -93,12 +138,14 @@ EdgeCoverage.prototype.findChild = function(nodeId) {
 			this.selectedEdges[node.edges[0]] = 1;
 			this.selectedEdges[node.children[0].edges[0]] = 1;
 			this.current = node.children[0].children[0];
+			this.index = 0;
 			return true;
 		} else if (node.children[1].children[0].id == nodeId) {
 		// Out of the DoWhile
 			this.selectedEdges[node.edges[1]] = 1;
 			this.selectedEdges[node.children[1].edges[0]] = 1;
 			this.current = node.children[1].children[0];
+			this.index = 0;
 			return true;
 		}
 	}
@@ -169,7 +216,7 @@ try{
 		//Node = require('./cfg').Node,
 		//compare = require('./compare').compare,
 		fs = require('fs'),
-		program1, program2, edgeCoverage, callGraph,
+		program1, program2, edgeCoverage, callGraph1, callGraph2,
 		_stack, _blockStack,  _version;
 		// stack item: {type, entry, exit}, program, function, loop, switch
 		// blockStack item: {body, index}
@@ -193,6 +240,34 @@ try{
 	process.exit(1);
 }
 
+// Parse anonymouse functions
+// Save them in fps(function pointers)
+// syntax is an object
+function parseAnonymousFunc(syntax, fps) {
+	var entryNode, exitNode, node;
+
+	if (syntax == null) return;
+	if (syntax.hasOwnProperty('type')) {	// Similar with parseFunction
+		if (syntax.type == 'FunctionExpression') {
+			entryNode = new Node(cloneObject(syntax));
+			fps[syntax.range] = entryNode;
+
+			// {'notVisited', 'visited', 'selectAll'}
+			entryNode.status = 'notVisited';
+			exitNode = new Node({type: 'FunctionExit'});
+			_stack.push({type: 'Function', entry: entryNode, exit: exitNode});
+			node = parseFunction(syntax.body, entryNode, fps);
+			if (node) node.addNext(exitNode);
+			_stack.pop();
+		}
+	}
+
+	for (var i in syntax) {
+		if (typeof(syntax[i]) == 'object')
+			parseAnonymousFunc(syntax[i], fps);
+	}
+}
+
 // Return program entry
 function parse(filename, fps) {
 	var content, options, syntax, program, programExit, src;
@@ -200,11 +275,13 @@ function parse(filename, fps) {
 	content = fs.readFileSync(filename);
 	options = {range: true};
 	syntax = esprima.parse(content, options);
-	console.log(JSON.stringify(syntax, null, 4));
+	//console.log(JSON.stringify(syntax, null, 4));
 
 	if (_version == 1)
 		_blockStack = new Array();
 	_stack = new Array();	// {type, entry, exit}
+
+	parseAnonymousFunc(syntax, fps);
 
 	program = new Node({type: 'ProgramEntry'});
 	programExit = new Node({type: 'ProgramExit'});
@@ -220,7 +297,7 @@ function parse(filename, fps) {
 	// Instrumented code
 	if (_version == 1) {
 		// Add console.log(1) to log ProgramExit
-		syntax.body.push(logStmtSyntax(1));
+		syntax.body.push(logStmtSyntax(programExit.id));
 
 		src = escodegen.generate(syntax);
 		//console.log(JSON.stringify(syntax, null, 4));
@@ -249,7 +326,7 @@ function parseFunction(syntax, prevNode, fps) {
 			node = parseFunction(value.body, entryNode, fps);
 			if (node) node.addNext(exitNode);
 			_stack.pop();
-			prevNode.functions[value.id.name] = entryNode;
+			//prevNode.functions[value.id.name] = entryNode;
 		}
 	});
 	return buildCFG(syntax, prevNode);
@@ -343,7 +420,7 @@ function buildCFG(syntax, prevNode) {
 		
 		if (_version == 1) insertLog(node.id);
 		
-		for (var i = _stack.length - 1; i--; i >= 0) {
+		for (var i = _stack.length - 1; i >= 0; i--) {
 			if (_stack[i].type == 'Function' || _stack[i].type == 'Program') {
 				node.addNext(_stack[i].exit);
 				break;
@@ -644,7 +721,7 @@ function cloneObject(obj) {
 // Compare two CFGs
 // The two nodes are identical already
 // Compare their children
-// Return 'visited' of 'selectAll'
+// Return 'visited' or 'selectAll'
 function compare(node1, node2) {
 	var i, j, child1, child2, findEqual, result;
 
@@ -706,16 +783,34 @@ function compare(node1, node2) {
 
 // True if two nodes are the same. Node is syntax
 function nodesEqual(node1, node2) {
-	if (node1 == node2)	return true;
-	if (JSON.stringify(node1) != JSON.stringify(node2))
+	//if (JSON.stringify(node1) != JSON.stringify(node2))
+	//	return false;
+	
+	if (typeof(node1) != typeof(node2))
 		return false;
 
-	/*for (var i in node1) {
+	if (typeof(node1) != 'object')
+		return node1 == node2;
+
+	if (node1 == null)
+		return node2 == null;
+
+	if (node2 == null)
+		return node1 == null;
+
+	if (node1.hasOwnProperty('type') && node2.hasOwnProperty('type'))
+		if (node1.type == 'FunctionExpression' && 
+			node2.type == 'FunctionExpression')
+			return true;
+	
+	for (var i in node1) {
 		if (!node2.hasOwnProperty(i))
 			return false;
+		if (i == 'range')
+			continue;
 		if (typeof(node1[i]) != typeof(node2[i]))
 			return false;
-		if (typeof(node1[i]) == 'object') {
+		if (typeof(node1[i] == 'object')) {
 			if (!nodesEqual(node1[i], node2[i]))
 				return false;
 		} else {
@@ -723,34 +818,74 @@ function nodesEqual(node1, node2) {
 				return false;
 		}
 	}
-
+	
 	for (var i in node2) {
 		if (!node1.hasOwnProperty(i))
 			return false;
-		if (typeof(node1[i]) != typeof(node2[i]))
-			return false;
-		if (typeof(node1[i]) == 'object') {
-			if (!nodesEqual(node1[i], node2[i]))
+	}
+
+	// Call
+	var range1, range2, i, j, edge1, edge2, fp1, fp2, status, result, finalResult;
+
+	if (node1 == null)
+		return true;
+	range1 = node1.range;
+	range2 = node2.range;
+	if (range1 == undefined || range2 == undefined)
+		return true;
+	
+	i = j = 0;
+	finalResult = true;
+	while (i < callGraph1.edges.length) {
+		edge1 = callGraph1.edges[i];
+		if (edge1[0] > range1[1])
+			break;
+		if (edge1[0] >= range1[0] && edge1[1] <= range1[1]) {
+			if (edge1[2] == 0 && edge1[3] == 0)	// Multiple callees
 				return false;
-		} else {
-			if (node1[i] != node2[i])
+			fp1 = callGraph1.fps[[edge1[2], edge1[3]]];
+			if (fp1 == undefined)
 				return false;
+			while (j < callGraph2.edges.length) {
+				edge2 = callGraph2.edges[i];
+				if (edge2[0] > range2[1])
+					break;
+				if (edge2[0] >= range2[0] && edge2[1] <= range2[1]) {
+					if (edge2[2] == 0 && edge2[3] == 0)
+						return false;
+					fp2 = callGraph2.fps[[edge2[2], edge2[3]]];
+					if (fp2 == undefined) 
+						return false;
+					status = fp1.status;
+					if (status == 'notVisited') {
+						fp1.status = 'visited';
+						result = compare(fp1, fp2);
+						fp1.status = result;
+						if (result == 'selectAll')
+							finalResult = false;
+					} else {
+						if (status == 'selectAll')
+							finalResult = false;
+					}
+				}
+				j++;
+			}
 		}
-	}*/
+		i++;
+	}
 
-	// CallExpression
+	return finalResult;
+
+/*	// CallExpression
 	var callee1, name2, status, result;
-
+	if (node1 == null) return true;
 	if (node1.type != 'ExpressionStatement')
 		return true;
-
 	if (node1.expression.type != 'CallExpression')
 		return true;
-
 	callee1 = node1.expression.callee;
 	if (callee1.type != 'Identifier')
 		return true;
-
 	console.log(callee1);
 	if (callee1.name in program1.functions) {
 		name2 = node2.expression.callee.name;
@@ -766,7 +901,6 @@ function nodesEqual(node1, node2) {
 			return status == 'visited';
 		}
 	}
-	
-	return true;
+	return true;*/
 }
 

@@ -8,10 +8,10 @@ for (i in a) {
 		s += a[i];
 }
 console.log(s);
-//hello();
+hello();
 
 function hello() {
-	return;
+	a++;
 	console.log('hello');
 }
 
