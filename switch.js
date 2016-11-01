@@ -1,4 +1,4 @@
-a = 1;
+a = 2;
 switch (a) {
 case 0:
 case 1:

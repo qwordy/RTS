@@ -2,8 +2,10 @@
 
 function Node(syntax) {
 	this.id = Node.id++;
-	console.log('node' + this.id);
-	console.log(syntax);
+	if (_debug) {
+		console.log('node' + this.id);
+		console.log(syntax);
+	}
 	this.children = new Array();	// successor
 	if (_stack.length > 0)
 		this.father = _stack[_stack.length - 1].entry;
@@ -17,8 +19,10 @@ Node.prototype = {
 	addNext: function(node) {
 		this.children.push(node);
 		this.edges.push(Node.edgeId);
-		console.log('edge' + Node.edgeId);
-		console.log('node' + this.id + ' -> node' + node.id);
+		if (_debug) {
+			console.log('edge' + Node.edgeId);
+			console.log('node' + this.id + ' -> node' + node.id);
+		}
 		Node.edgeId++;
 	}
 };
@@ -27,6 +31,20 @@ Node.id = 0;
 Node.edgeId = 0;
 
 function EdgeCoverage() {
+	var n = process.argv[4];	// number of test cases
+	if (n == undefined)
+		n = 1;
+	else
+		n = Number(n);
+	if (isNaN(n))
+		throw new Error('argv[4] is not a number');
+
+	this.selectedTest = [];
+	for (this.testId = 0; this.testId < n; this.testId++)
+		this.work();
+}
+
+EdgeCoverage.prototype.work = function () {
 	this.selectedEdges = {};	// {edgeId1: 1, edgeId2: 1, ...}
 	this.current = program1;	// currentNode when infer
 
@@ -38,15 +56,31 @@ function EdgeCoverage() {
 	this.index = 0;	// Traverse callEdges from the index-th
 
 	this.infer();
-	console.log(this.selectedEdges);
+	//console.log(this.selectedEdges);
+
+	var find = false;
+	for (var i in dangerEdges) {
+		if (dangerEdges[i] in this.selectedEdges) {
+			find = true;
+			break;
+		}
+	}
+	if (find)
+		this.selectedTest.push(this.testId);
 }
 
 // Infer edges coverage from log
 EdgeCoverage.prototype.infer = function() {
-	var execSync, log, tokens, i, nodeId, current;
+	var execSync, log, tokens, i, nodeId, current, time0, time1;
 
 	execSync = require('child_process').execSync;
-	log = execSync('node ' + instFilename(process.argv[2])).toString();
+	time0 = new Date().getTime();
+	//console.log('Test ' + this.testId);
+	log = execSync('node ' + instFilename(process.argv[2])
+		+ ' ' + this.testId).toString();
+	time1 = new Date().getTime();
+	_time.childTime += time1 - time0;
+	
 	tokens = log.split(/[ \n]/g);
 	for (i = 0; i < tokens.length; i++) {
 		if (tokens[i] == 'node') {
@@ -72,8 +106,12 @@ EdgeCoverage.prototype.findChild = function(nodeId) {
 	var i, node, edge, fp, range;
 
 	node = this.current;
-	console.log(node.id + ' ' + nodeId);
-	//if (node.id == 64) process.exit(1);
+	if (_debug)
+		console.log(node.id + ' ' + nodeId);
+	/*if (node.id == 65) {
+		console.log(node.syntax.range);
+		process.exit(1);
+	}*/
 	for (i in node.children) {
 		if (node.children[i].id == nodeId) {
 			this.selectedEdges[node.edges[i]] = 1;
@@ -95,11 +133,14 @@ EdgeCoverage.prototype.findChild = function(nodeId) {
 				} else {
 					fp = callGraph1.fps[[edge[2], edge[3]]];
 					if (fp != undefined) {
-						console.log('enter function ' + fp.syntax.range);
-						this.callStack.push([this.current, i + 1]);
-						this.current = fp;
-						this.index = 0;
-						return false;
+						if (fp.children[0].id == nodeId) {
+							if (_debug)
+								console.log('enter function ' + fp.syntax.range);
+							this.callStack.push([this.current, i + 1]);
+							this.current = fp;
+							this.index = 0;
+							return false;
+						}
 					}
 				}
 			}
@@ -172,7 +213,8 @@ CallGraph.prototype.parse = function(filename) {
 	output = execSync('node acg/main --cg ' + filename).toString();
 	lines = output.split('\n');
 	lines.pop();
-	console.log(lines);
+	if (_debug)
+		console.log(lines);
 	
 	i = 0;
 	while (i < lines.length) {
@@ -217,27 +259,82 @@ try{
 		//compare = require('./compare').compare,
 		fs = require('fs'),
 		program1, program2, edgeCoverage, callGraph1, callGraph2,
-		_stack, _blockStack,  _version;
+		dangerEdges, _time,
+		_stack, _blockStack,  _version, _debug;
 		// stack item: {type, entry, exit}, program, function, loop, switch
 		// blockStack item: {body, index}
 	
+	_debug = 0;	// debug mode
+	_time = {};	// field: start, end, childTime
+	_time.childTime = 0;
+	_time.start = new Date().getTime();
+
 	_version = 1;	// program version
 	callGraph1 = new CallGraph(process.argv[2]);
 	program1 = parse(process.argv[2], callGraph1.fps);
-	console.log(callGraph1.edges);
-	console.log(callGraph1.fps);
-	edgeCoverage = new EdgeCoverage();
+	if (_debug) {
+		console.log(callGraph1.edges);
+		console.log(callGraph1.fps);
+	}
 
 	Node.id = Node.edgeId = 0;
 	_version = 2;
 	callGraph2 = new CallGraph(process.argv[3]);
 	program2 = parse(process.argv[3], callGraph2.fps);
 
+	dangerEdges = [];
 	compare(program1, program2);
+
+	edgeCoverage = new EdgeCoverage();
+
+	_time.end = new Date().getTime();
+
+	output();
 } catch (e) {
 	//console.log(e.message);
 	console.log(e.stack);
 	process.exit(1);
+}
+
+// Output result
+function output() {
+	var str, i;
+
+	console.log('\n==== Result ====');
+
+	//console.log('Edge coverage:');
+	//console.log(JSON.stringify(edgeCoverage.selectedEdges));
+
+	console.log('Dangerous edges:');
+	str = '';
+	for (i in dangerEdges)
+		str += dangerEdges[i] + ' ';
+	console.log(str);
+
+	console.log('Selected tests:');
+	str = '';
+	edgeCoverage.selectedTest.forEach(function(value) {
+		str += value + ' ';
+	});
+	console.log(str);
+
+	//console.log('Testing time:');
+	//console.log(_time.childTime / 1000);
+
+	console.log('Analysis time:');
+	console.log((_time.end - _time.start - _time.childTime) / 1000);
+
+	console.log();
+
+	/*console.log('Selected?');
+	var find = false;
+	for (var i in dangerEdges) {
+		if (dangerEdges[i] in edgeCoverage.selectedEdges) {
+			find = true;
+			break;
+		}
+	}
+	console.log(find ? 'Yes' : 'No');*/
 }
 
 // Parse anonymouse functions
@@ -463,7 +560,11 @@ function buildCFG(syntax, prevNode) {
 	case 'ForInStatement':
 		var forNode, endForNode, bodyEndNode;
 
-		forNode = new Node(cloneObject(syntax));	// for head node
+		forNode = new Node(cloneObject(syntax));	// for head node.
+		if (syntax.type == 'ForStatement')
+			forNode.range = [syntax.test.range[0], syntax.update.range[1]];
+		else
+			forNode.range = syntax.left.range;
 		if (prevNode) prevNode.addNext(forNode);
 
 		if (_version == 1) insertLog(forNode.id);
@@ -491,6 +592,7 @@ function buildCFG(syntax, prevNode) {
 		var whileNode, endWhileNode, bodyEndNode;
 
 		whileNode = new Node(cloneObject(syntax));
+		whileNode.range = syntax.test.range;
 		if (prevNode) prevNode.addNext(whileNode);
 
 		if (_version == 1) insertLog(whileNode.id);
@@ -526,6 +628,7 @@ function buildCFG(syntax, prevNode) {
 		whileNode.addNext(doNode);
 
 		endDoNode = new Node({type: 'EndDo'});
+		endDoNode.range = syntax.test.range;
 		whileNode.addNext(endDoNode);
 
 		_stack.push({type: 'Do', entry: doNode, exit: endDoNode, doCond: whileNode});
@@ -577,6 +680,7 @@ function buildCFG(syntax, prevNode) {
 		ifSyntax = {};	// if syntax head
 		ifSyntax.type = syntax.type;
 		ifSyntax.test = syntax.test;
+		ifSyntax.range = syntax.test.range;
 
 		ifNode = new Node(ifSyntax);	// if head node
 		if (prevNode) prevNode.addNext(ifNode);
@@ -627,6 +731,7 @@ function buildCFG(syntax, prevNode) {
 		switchSyntax = {};
 		switchSyntax.type = syntax.type;
 		switchSyntax.discriminant = syntax.discriminant;
+		switchSyntax.range = syntax.discriminant.range;
 
 		switchNode = new Node(switchSyntax);
 		if (prevNode) prevNode.addNext(switchNode);
@@ -725,7 +830,8 @@ function cloneObject(obj) {
 function compare(node1, node2) {
 	var i, j, child1, child2, findEqual, result;
 
-	console.log(node1.id + ' ' + node2.id + ' ' + node1.syntax.type);
+	if (_debug)
+		console.log(node1.id + ' ' + node2.id + ' ' + node1.syntax.type);
 
 	if (node1.syntax.type == 'FunctionExit')
 		return 'visited';
@@ -740,8 +846,9 @@ function compare(node1, node2) {
 		if (node1.syntax.type == 'SwitchStatement') {
 			for (j in node2.children) {
 				child2 = node2.children[j];
-				console.log(node1.id + ' ' + node2.id + ' ' + 
-					child1.id + ' ' + child2.id);
+				if (_debug)
+					console.log(node1.id + ' ' + node2.id + ' ' + 
+						child1.id + ' ' + child2.id);
 				if (nodesEqual(child1.syntax, child2.syntax)) {
 					findEqual = true;
 					break;
@@ -749,8 +856,9 @@ function compare(node1, node2) {
 			}
 		} else {
 			child2 = node2.children[i];
-			console.log(node1.id + ' ' + node2.id + ' ' + 
-				child1.id + ' ' + child2.id);
+			if (_debug)
+				console.log(node1.id + ' ' + node2.id + ' ' + 
+					child1.id + ' ' + child2.id);
 			findEqual = nodesEqual(child1.syntax, child2.syntax);
 		}
 
@@ -763,7 +871,9 @@ function compare(node1, node2) {
 					// New case is added in P'
 					// Mark the edge to default case in P sensitive
 					if (cases[i].visited == null) {
-						console.log('danger ' + node1.father.edges[i]);
+						var edges = node1.father.edges;
+						//console.log('danger ' + edges[edges.length - 1]);
+						dangerEdges.push(edges[edges.length - 1]);
 						break;
 					}
 				}
@@ -774,7 +884,9 @@ function compare(node1, node2) {
 					result = 'visited';
 			}
 		} else {
-			console.log('danger ' + node1.edges[i]);
+			if (_debug)
+				console.log('danger ' + node1.edges[i]);
+			dangerEdges.push(node1.edges[i]);
 		}
 	}
 

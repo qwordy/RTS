@@ -1,5 +1,5 @@
 console.log('node 2');
-a = 1;
+a = 2;
 console.log('node 3');
 switch (a) {
 case 0:
